@@ -45,6 +45,7 @@ crons = ["0 16 * * *"]
 [vars]
 SW_VERSION = "v1"
 ENVIRONMENT = "production"
+ENCRYPTION_KEY = "10j9yr311is6ou"
 
 # ====================================
 # 开发/测试环境配置
@@ -59,3 +60,4 @@ binding = "SECRETS_KV"
 [env.development.vars]
 ENVIRONMENT = "development"
 SW_VERSION = "v1"
+ENCRYPTION_KEY = "10j9yr311is6ou"
