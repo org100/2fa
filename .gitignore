@@ -27,6 +27,8 @@ lib-cov
 
 coverage
 \*.lcov
+test-results/
+playwright-report/
 
 # nyc test coverage
 
@@ -170,6 +172,9 @@ dist
 
 .dev.vars
 .wrangler/
+# Temporary deployment config written by scripts/deploy.js (wrangler.toml itself is never modified)
+/wrangler.deploy.*.tmp.toml
+/wrangler.dev.*.tmp.toml
 
 # Local AI tooling artifacts
 CLAUDE.md
@@ -178,3 +183,4 @@ CLAUDE.md
 
 # Local review notes
 /docs/reviews/
+/docs/reports/

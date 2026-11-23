@@ -2,22 +2,22 @@
  * Browser clock synchronization module.
  * Keeps TOTP generation aligned with the Worker clock without sending secrets.
  */
+import { getOfflineClockCode } from './offlineCache.js';
 
 /**
  * Get the browser clock synchronization code.
  * @returns {string} Clock synchronization JavaScript code
  */
 export function getTimeCode() {
-	return `    // ========== Trusted clock synchronization ==========
+	return `${getOfflineClockCode()}
+    // ========== Trusted clock synchronization ==========
     const CLOCK_SYNC_STORAGE_KEY = '2fa-clock-sync-v1';
     const CLOCK_SYNC_CACHE_VERSION = 2;
     const CLOCK_SYNC_SAMPLE_COUNT = 3;
     const CLOCK_SYNC_TIMEOUT_MS = 2500;
     const CLOCK_SYNC_MAX_RTT_MS = 2000;
     const CLOCK_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
-    const CLOCK_SYNC_STALE_MS = 24 * 60 * 60 * 1000;
     const CLOCK_SYNC_SAMPLE_WALL_DRIFT_TOLERANCE_MS = 1000;
-    const CLOCK_SYNC_CACHE_WALL_DRIFT_TOLERANCE_MS = 60 * 1000;
     const CLOCK_SYNC_MIN_SERVER_TIME_MS = Date.UTC(2000, 0, 1);
     const CLOCK_SYNC_MAX_SERVER_TIME_MS = Date.UTC(2100, 0, 1);
 
@@ -37,7 +37,6 @@ export function getTimeCode() {
         this.syncAttemptId = 0;
         this.activeSampleControllers = new Set();
         this.started = false;
-        this.hasSettledSync = false;
         this.loadCachedOffset();
       }
 
@@ -74,43 +73,19 @@ export function getTimeCode() {
           const raw = localStorage.getItem(CLOCK_SYNC_STORAGE_KEY);
           if (!raw) return;
 
-          const cached = JSON.parse(raw);
-          if (
-            cached.version !== CLOCK_SYNC_CACHE_VERSION ||
-            !Number.isFinite(cached.offsetMs) ||
-            !this.isValidServerTime(cached.syncedAtServerMs) ||
-            !this.isValidServerTime(cached.localWallAtSyncMs) ||
-            !this.isValidServerTime(cached.monotonicEpochAtSyncMs)
-          ) {
-            localStorage.removeItem(CLOCK_SYNC_STORAGE_KEY);
-            return;
-          }
-
-          const monotonicEpochNow = this.monotonicEpochNow();
-          const wallElapsedMs = Date.now() - cached.localWallAtSyncMs;
-          const monotonicElapsedMs = Number.isFinite(monotonicEpochNow)
-            ? monotonicEpochNow - cached.monotonicEpochAtSyncMs
-            : null;
-          if (
-            !Number.isFinite(monotonicElapsedMs) ||
-            Math.abs(wallElapsedMs - monotonicElapsedMs) > CLOCK_SYNC_CACHE_WALL_DRIFT_TOLERANCE_MS
-          ) {
-            localStorage.removeItem(CLOCK_SYNC_STORAGE_KEY);
-            return;
-          }
-
-          const estimatedServerNow = Date.now() + cached.offsetMs;
-          if (!this.isValidServerTime(estimatedServerNow) || estimatedServerNow - cached.syncedAtServerMs < -5 * 60 * 1000) {
+          const wallNow = Date.now();
+          const cached = parseOfflineClockCache(raw, wallNow, this.monotonicEpochNow());
+          if (!cached) {
             localStorage.removeItem(CLOCK_SYNC_STORAGE_KEY);
             return;
           }
 
           this.offsetMs = cached.offsetMs;
           this.syncedAtServerMs = cached.syncedAtServerMs;
-          this.rttMs = Number.isFinite(cached.rttMs) ? cached.rttMs : null;
+          this.rttMs = cached.rttMs;
           this.localWallAtSyncMs = cached.localWallAtSyncMs;
           this.monotonicEpochAtSyncMs = cached.monotonicEpochAtSyncMs;
-          this.establishAnchor(estimatedServerNow);
+          this.establishAnchor(wallNow + cached.offsetMs);
           this.status = 'cached';
           this.generation += 1;
         } catch (error) {
@@ -164,7 +139,7 @@ export function getTimeCode() {
           });
 
           if (!response.ok) {
-            throw new Error('时间接口返回状态 ' + response.status);
+            throw new Error(t('clockHttpError', { status: response.status }));
           }
           const data = await response.json();
           const monotonicEndMs = this.monotonicNow();
@@ -173,18 +148,18 @@ export function getTimeCode() {
           const wallElapsedMs = wallEndMs - wallStartMs;
 
           if (!Number.isFinite(rttMs) || rttMs < 0 || rttMs > CLOCK_SYNC_MAX_RTT_MS) {
-            throw new Error('时间同步网络延迟过高');
+            throw new Error(t('clockLatencyError'));
           }
           if (
             !Number.isFinite(wallElapsedMs) ||
             wallElapsedMs < 0 ||
             Math.abs(wallElapsedMs - rttMs) > CLOCK_SYNC_SAMPLE_WALL_DRIFT_TOLERANCE_MS
           ) {
-            throw new Error('时间同步期间设备时钟发生跳变');
+            throw new Error(t('clockJumpError'));
           }
 
           if (!data || !this.isValidServerTime(data.serverTimeMs)) {
-            throw new Error('时间接口返回了无效时间');
+            throw new Error(t('clockInvalidTime'));
           }
 
           const localMidpointMs = wallStartMs + rttMs / 2;
@@ -249,18 +224,16 @@ export function getTimeCode() {
         this.localWallAtSyncMs = Date.now();
         this.monotonicEpochAtSyncMs = this.monotonicEpochNow();
         this.status = 'synced';
-        this.hasSettledSync = true;
         this.generation += 1;
         this.persistOffset();
-        this.renderStatus();
         refreshTOTPsAfterClockChange();
+        notifyTrustedClockEnvironment('clock-synced');
         return true;
       }
 
       markSyncFailure() {
-        this.hasSettledSync = true;
         this.status = Number.isFinite(this.offsetMs) ? 'cached' : 'local';
-        this.renderStatus();
+        notifyTrustedClockEnvironment('clock-sync-failed');
       }
 
       hasClockDiscontinuity() {
@@ -283,8 +256,8 @@ export function getTimeCode() {
           this.status = 'local';
         }
         this.generation += 1;
-        this.renderStatus();
         refreshTOTPsAfterClockChange();
+        notifyTrustedClockEnvironment('clock-discontinuity');
         return true;
       }
 
@@ -301,9 +274,7 @@ export function getTimeCode() {
 
         this.syncPromise = task.finally(() => {
           this.syncPromise = null;
-          this.renderStatus();
         });
-        this.renderStatus();
         return this.syncPromise;
       }
 
@@ -332,54 +303,9 @@ export function getTimeCode() {
         return this.sync();
       }
 
-      getCacheAgeMs() {
-        if (!this.isValidServerTime(this.syncedAtServerMs)) return null;
-        return Math.max(0, this.now() - this.syncedAtServerMs);
-      }
-
-      formatAge(ageMs) {
-        if (!Number.isFinite(ageMs) || ageMs < 60 * 1000) return '刚刚';
-        if (ageMs < 60 * 60 * 1000) return Math.floor(ageMs / (60 * 1000)) + ' 分钟前';
-        if (ageMs < 24 * 60 * 60 * 1000) return Math.floor(ageMs / (60 * 60 * 1000)) + ' 小时前';
-        return Math.floor(ageMs / (24 * 60 * 60 * 1000)) + ' 天前';
-      }
-
-      renderStatus() {
-        if (typeof document === 'undefined') return;
-        const warning = document.getElementById('clockWarning');
-        const text = document.getElementById('clockWarningText');
-        const retryButton = document.getElementById('clockSyncRetryButton');
-        if (!warning || !text) return;
-
-        const ageMs = this.getCacheAgeMs();
-        const isStale = Number.isFinite(ageMs) && ageMs > CLOCK_SYNC_STALE_MS;
-        let message = '';
-
-        // 首次校准落地前不提示：页面刚加载时缓存偏移已生效但校准仍在进行，
-        // 此时提示会在校准成功后立即消失，表现为刷新时的一次闪烁。
-        if (!this.hasSettledSync) {
-          message = '';
-        } else if (this.status === 'local') {
-          message = '无法校准服务器时间，OTP 正在使用设备时间，可能不正确。';
-        } else if (this.status === 'cached') {
-          const ageText = this.formatAge(ageMs);
-          message = isStale
-            ? '正在使用 ' + ageText + ' 的时间校准缓存，OTP 可能不准确。'
-            : '正在使用上次时间校准（' + ageText + '）。如设备时间已调整，OTP 可能不准确；联网后将自动更新。';
-        } else if (isStale) {
-          message = '服务器时间已超过 24 小时未校准，OTP 可能不准确。';
-        }
-
-        warning.hidden = !message;
-        warning.classList.toggle('show', Boolean(message));
-        text.textContent = message;
-        if (retryButton) retryButton.disabled = Boolean(this.syncPromise);
-      }
-
       start() {
         if (this.started) return;
         this.started = true;
-        this.renderStatus();
 
         if (typeof window !== 'undefined') {
           window.addEventListener('online', () => this.handleResume());
@@ -388,7 +314,6 @@ export function getTimeCode() {
             if (event.persisted) this.handleResume();
           });
           window.setInterval(() => {
-            this.renderStatus();
             const isVisible = typeof document === 'undefined' || !document.hidden;
             const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
             if (isVisible && isOnline) this.sync();
@@ -431,50 +356,19 @@ export function getTimeCode() {
       return trustedClock.sync();
     }
 
-    async function retryClockSync() {
-      const success = await trustedClock.sync();
-      if (typeof showCenterToast === 'function') {
-        showCenterToast(success ? '✓' : '!', success ? '时间校准成功' : '时间校准失败，请检查网络连接');
+    // Initial cached state is read by runtime construction. Subsequent clock
+    // transitions must also reach subscribers when there are no OTP commits.
+    function notifyTrustedClockEnvironment(reason) {
+      try {
+        if (typeof notifyThemeRuntimeEnvironment === 'function') notifyThemeRuntimeEnvironment(reason);
+      } catch (error) {
+        console.warn('时间状态通知失败:', error);
       }
-      return success;
     }
 
     function refreshTOTPsAfterClockChange() {
-      if (typeof clearAllOTPAnimations === 'function') {
-        clearAllOTPAnimations();
-      }
-      if (typeof invalidateOTPWindowSchedulerForClockChange === 'function') {
-        invalidateOTPWindowSchedulerForClockChange();
-      }
-      if (typeof otpCalculator !== 'undefined' && typeof otpCalculator.clearCache === 'function') {
-        otpCalculator.clearCache();
-      }
-      if (typeof secrets === 'undefined' || !Array.isArray(secrets) || typeof updateOTP !== 'function') return;
-
-      if (typeof updateOTPSecretsInBatch === 'function') {
-        updateOTPSecretsInBatch(secrets);
-        secrets.forEach(secret => {
-          if (secret.type && secret.type.toUpperCase() === 'HOTP') return;
-          if (typeof updateCountdown === 'function') updateCountdown(secret.id, secret);
-        });
-        return;
-      }
-
-      const animationBatch = typeof createOTPAnimationBatch === 'function'
-        ? createOTPAnimationBatch()
-        : null;
-      secrets.forEach(secret => {
-        if (secret.type && secret.type.toUpperCase() === 'HOTP') return;
-        try {
-          updateOTP(secret.id, animationBatch, secret);
-        } catch (error) {
-          console.warn('校时后刷新OTP失败:', error);
-        }
-        if (typeof updateCountdown === 'function') updateCountdown(secret.id, secret);
-      });
-      if (animationBatch && typeof sealOTPAnimationBatch === 'function') {
-        sealOTPAnimationBatch(animationBatch);
-      }
+      if (typeof clearAllOTPAnimations === 'function') clearAllOTPAnimations();
+      if (typeof getOtpEngine === 'function') return getOtpEngine().clockChanged();
     }
 
 `;

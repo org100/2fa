@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { createAccountStore } from '../../src/ui/runtime/accountStore.js';
+import { createAccountViewState } from '../../src/ui/runtime/accountViewState.js';
+import { createThemeSdk } from '../../src/ui/runtime/themeSdk.js';
 import { getOTPCode } from '../../src/ui/scripts/otp.js';
 import { getTimeCode } from '../../src/ui/scripts/time.js';
+import { getI18nCode } from '../../src/ui/scripts/i18n.js';
 
 const SERVER_BASE_MS = Date.UTC(2026, 0, 1);
 const STORAGE_KEY = '2fa-clock-sync-v1';
@@ -47,6 +51,13 @@ function createWarningElements() {
 	};
 }
 
+function expectSilentClockUI(harness, elements) {
+	expect(elements.clockWarning.hidden).toBe(true);
+	expect(elements.clockWarningText.textContent).toBe('');
+	expect(elements.clockWarning.classList.toggle).not.toHaveBeenCalledWith('show', true);
+	expect(harness.showCenterToast).not.toHaveBeenCalled();
+}
+
 function createDocument(elements = {}) {
 	return {
 		hidden: false,
@@ -71,10 +82,12 @@ function createHarness({
 	};
 	const localStorage = createStorage(storageValues);
 	const document = createDocument(elements);
-	const fakeDate = {
-		now: () => state.localEpochMs + state.monotonicMs + state.wallClockAdjustmentMs,
-		UTC: Date.UTC,
-	};
+	class FakeDate extends Date {
+		static now() {
+			return state.localEpochMs + state.monotonicMs + state.wallClockAdjustmentMs;
+		}
+	}
+	const fakeDate = FakeDate;
 	const performance = {
 		timeOrigin: performanceTimeOriginMs,
 		now: () => state.monotonicMs,
@@ -112,6 +125,7 @@ function createHarness({
 			state.pendingRequests.push(request);
 		});
 	});
+	const showCenterToast = vi.fn();
 	const silentConsole = {
 		log: vi.fn(),
 		warn: vi.fn(),
@@ -123,8 +137,17 @@ function createHarness({
 		crypto: globalThis.crypto,
 	};
 
+	const accountStore = createAccountStore({ records: secrets });
+	const environmentListeners = new Set();
+	const notifyEnvironment = vi.fn((reason) => {
+		for (const listener of environmentListeners) {
+			listener(reason);
+		}
+	});
 	// eslint-disable-next-line no-new-func
 	const api = new Function(
+		'accountStore',
+		'notifyThemeRuntimeEnvironment',
 		'Date',
 		'performance',
 		'fetch',
@@ -140,16 +163,22 @@ function createHarness({
 		'console',
 		'secrets',
 		'otpIntervals',
-		`${getTimeCode()}${getOTPCode()}; return {
+		'showCenterToast',
+		`${getI18nCode()}${getTimeCode()}${getOTPCode()}; return {
+			setLanguage,
 			TrustedClock,
 			trustedClock,
 			getCorrectedNowMs,
 			ensureServerTimeSynchronized,
 			syncServerTime,
+			getOtpEngine,
+			otpPresentation,
 			otpCalculator,
 			updateCountdown
 		};`,
 	)(
+		accountStore,
+		notifyEnvironment,
 		fakeDate,
 		performance,
 		fetch,
@@ -165,6 +194,7 @@ function createHarness({
 		silentConsole,
 		secrets,
 		{},
+		showCenterToast,
 	);
 
 	function queueSamples(samples) {
@@ -209,6 +239,9 @@ function createHarness({
 	}
 
 	return {
+		notifyEnvironment,
+		environmentListeners,
+		accountStore,
 		api,
 		completeNextPendingRequest,
 		completePendingRequests,
@@ -217,6 +250,7 @@ function createHarness({
 		localStorage,
 		navigator,
 		queueSamples,
+		showCenterToast,
 		state,
 		window,
 	};
@@ -230,6 +264,62 @@ async function runSync(harness, samples) {
 }
 
 describe('trusted browser clock', () => {
+	it('publishes synchronization, failed refresh, and clock discontinuity to an empty-account SDK', async () => {
+		const h = createHarness();
+		const runtime = createThemeSdk({
+			accounts: h.accountStore,
+			otp: h.api.getOtpEngine(),
+			commands: {},
+			view: createAccountViewState(),
+			environment: {
+				getSnapshot: () => ({
+					clock: { status: h.api.trustedClock.status, generation: h.api.trustedClock.generation, correctedNow: h.api.getCorrectedNowMs() },
+				}),
+				subscribe: (listener) => {
+					h.environmentListeners.add(listener);
+					return () => h.environmentListeners.delete(listener);
+				},
+			},
+		});
+		const seen = [];
+		runtime.sdk.subscribe((snapshot) => seen.push(snapshot.clock));
+		expect(seen).toEqual([{ status: 'local', generation: 0, correctedNow: SERVER_BASE_MS }]);
+		await runSync(
+			h,
+			[20, 40, 60].map((rttMs) => ({ rttMs, offsetMs: 10_000 })),
+		);
+		expect(seen.at(-1)).toMatchObject({ status: 'synced', generation: 1 });
+		expect(h.notifyEnvironment).toHaveBeenLastCalledWith('clock-synced');
+		await runSync(
+			h,
+			[20, 40, 60].map((rttMs) => ({ rttMs, reject: true })),
+		);
+		expect(seen.at(-1)).toMatchObject({ status: 'cached', generation: 1 });
+		expect(h.notifyEnvironment).toHaveBeenLastCalledWith('clock-sync-failed');
+		h.state.wallClockAdjustmentMs += 60_000;
+		expect(h.api.trustedClock.recoverFromClockDiscontinuity()).toBe(true);
+		expect(seen.at(-1)).toMatchObject({ status: 'cached', generation: 2 });
+		expect(h.notifyEnvironment).toHaveBeenLastCalledWith('clock-discontinuity');
+		expect(runtime.sdk.getSnapshot().library.accounts).toEqual([]);
+		runtime.dispose();
+		h.api.getOtpEngine().dispose();
+	});
+
+	it('does not undo a confirmed clock sync when an environment observer throws', async () => {
+		const h = createHarness();
+		h.notifyEnvironment.mockImplementation(() => {
+			throw new Error('observer failure');
+		});
+		await expect(
+			runSync(
+				h,
+				[20, 40, 60].map((rttMs) => ({ rttMs, offsetMs: 1000 })),
+			),
+		).resolves.toBe(true);
+		expect(h.api.trustedClock.status).toBe('synced');
+		expect(h.api.trustedClock.generation).toBe(1);
+	});
+
 	it.each([
 		['fast', 5 * 60 * 1000, -5 * 60 * 1000],
 		['slow', -4 * 60 * 1000, 4 * 60 * 1000],
@@ -449,26 +539,26 @@ describe('trusted browser clock', () => {
 		expect(harness.api.trustedClock.generation).toBe(recoveredState.generation + 1);
 	});
 
-	it('downgrades an ordinary failed resync to cached and displays a warning', async () => {
+	it('silently keeps the cached correction after a failed resync and a language change', async () => {
 		const elements = createWarningElements();
 		const harness = createHarness({ elements });
 		await runSync(
 			harness,
 			[20, 40, 60].map((rttMs) => ({ rttMs, offsetMs: 30_000 })),
 		);
-		expect(elements.clockWarning.hidden).toBe(true);
-
 		await expect(
 			runSync(
 				harness,
 				[20, 40, 60].map((rttMs) => ({ reject: true, rttMs })),
 			),
 		).resolves.toBe(false);
-
 		expect(harness.api.trustedClock.status).toBe('cached');
-		expect(elements.clockWarning.hidden).toBe(false);
-		expect(elements.clockWarning.classList.toggle).toHaveBeenLastCalledWith('show', true);
-		expect(elements.clockWarningText.textContent).not.toBe('');
+		const calls = harness.fetch.mock.calls.length;
+		harness.api.setLanguage('en');
+		harness.api.setLanguage('zh-TW');
+		expect(harness.fetch).toHaveBeenCalledTimes(calls);
+		expect(harness.api.trustedClock.offsetMs).toBe(30_000);
+		expectSilentClockUI(harness, elements);
 	});
 
 	it.each([
@@ -589,56 +679,76 @@ describe('trusted browser clock', () => {
 		expect(elements.clockWarning.classList.toggle).not.toHaveBeenCalledWith('show', true);
 	});
 
-	it('shows the cached warning once the first sync fails instead of before it settles', async () => {
+	it.each([
+		['no calibration', null, 'local'],
+		['old calibration', createCachedClock({ offsetMs: 12_000, localWallAtSyncMs: SERVER_BASE_MS - 25 * 60 * 60 * 1000 }), 'cached'],
+	])('stays silent with %s when startup and offline resume cannot synchronize', async (_name, cached, expectedStatus) => {
 		const elements = createWarningElements();
-		const harness = createHarness({
-			elements,
-			storageValues: {
-				[STORAGE_KEY]: createCachedClock({
-					offsetMs: 12_000,
-					localWallAtSyncMs: SERVER_BASE_MS - 60 * 60 * 1000,
-				}),
-			},
-		});
-
+		const harness = createHarness({ elements, storageValues: cached ? { [STORAGE_KEY]: cached } : {} });
+		expectSilentClockUI(harness, elements);
 		harness.queueSamples([20, 40, 60].map((rttMs) => ({ reject: true, rttMs })));
 		harness.api.trustedClock.start();
 		const initialSync = harness.api.trustedClock.syncPromise;
-		expect(elements.clockWarning.hidden).toBe(true);
-
 		await harness.completePendingRequests();
 		await expect(initialSync).resolves.toBe(false);
-
-		expect(harness.api.trustedClock.status).toBe('cached');
-		expect(elements.clockWarning.hidden).toBe(false);
-		expect(elements.clockWarning.classList.toggle).toHaveBeenLastCalledWith('show', true);
-		expect(elements.clockWarningText.textContent).not.toBe('');
-	});
-
-	it('shows a stale warning after 24 hours during periodic and offline status refreshes', async () => {
-		const elements = createWarningElements();
-		const harness = createHarness({ elements });
-		await runSync(
-			harness,
-			[20, 40, 60].map((rttMs) => ({ rttMs, offsetMs: 30_000 })),
-		);
-		expect(elements.clockWarning.hidden).toBe(true);
-
-		harness.state.monotonicMs += 25 * 60 * 60 * 1000;
-		harness.api.trustedClock.renderStatus();
-		expect(harness.api.trustedClock.getCacheAgeMs()).toBeGreaterThan(24 * 60 * 60 * 1000);
-		expect(elements.clockWarning.hidden).toBe(false);
-		expect(elements.clockWarningText.textContent).not.toBe('');
-
-		elements.clockWarning.hidden = true;
-		elements.clockWarningText.textContent = '';
+		expect(harness.api.trustedClock.status).toBe(expectedStatus);
+		expect(harness.api.trustedClock.offsetMs).toBe(cached ? 12_000 : null);
+		expectSilentClockUI(harness, elements);
 		harness.navigator.onLine = false;
 		await expect(harness.api.trustedClock.handleResume()).resolves.toBe(false);
-		expect(harness.api.trustedClock.status).toBe('cached');
-		expect(elements.clockWarning.hidden).toBe(false);
-		expect(elements.clockWarning.classList.toggle).toHaveBeenLastCalledWith('show', true);
-		expect(elements.clockWarningText.textContent).not.toBe('');
+		expect(harness.api.trustedClock.status).toBe(expectedStatus);
+		expectSilentClockUI(harness, elements);
 	});
+
+	it.each(['online', 'visibilitychange', 'pageshow', 'interval'])(
+		'automatically synchronizes and refreshes OTPs after %s without UI feedback',
+		async (eventName) => {
+			const secret = { id: 'automatic', name: 'Automatic sync', secret: 'JBSWY3DPEHPK3PXP', type: 'TOTP', period: 30 };
+			const hotp = { ...secret, id: 'hotp', type: 'HOTP', counter: 5 };
+			const elements = {
+				...createWarningElements(),
+				'otp-automatic': { textContent: 'initial' },
+				'next-otp-automatic': { textContent: 'initial' },
+				'progress-automatic': { style: {} },
+				'otp-hotp': { textContent: 'unchanged HOTP' },
+			};
+			const harness = createHarness({ elements, secrets: [secret, hotp] });
+			harness.queueSamples([20, 40, 60].map((rttMs) => ({ rttMs, offsetMs: 0 })));
+			harness.api.trustedClock.start();
+			const initialSync = harness.api.trustedClock.syncPromise;
+			await harness.completePendingRequests();
+			await expect(initialSync).resolves.toBe(true);
+			await vi.waitFor(() => expect(elements['otp-automatic'].textContent).toMatch(/^\d{6}$/));
+			const initialCode = elements['otp-automatic'].textContent;
+			// A page restore initializes missing codes. Seed an actual committed
+			// HOTP to verify clock refresh preserves its value and identity.
+			await harness.api.getOtpEngine().refreshOne('hotp');
+			const initialHOTP = harness.api.getOtpEngine().readCommitted('hotp');
+			harness.fetch.mockClear();
+			harness.queueSamples([20, 40, 60].map((rttMs) => ({ rttMs, offsetMs: 90_000 })));
+			if (eventName === 'interval') {
+				const [tick, delay] = harness.window.setInterval.mock.calls[0];
+				expect(delay).toBe(6 * 60 * 60 * 1000);
+				tick();
+			} else {
+				const target = eventName === 'visibilitychange' ? harness.document : harness.window;
+				target.addEventListener.mock.calls.filter(([name]) => name === eventName).forEach(([, listener]) => listener({ persisted: true }));
+			}
+			const resumedSync = harness.api.trustedClock.syncPromise;
+			expect(harness.fetch).toHaveBeenCalledTimes(3);
+			await harness.completePendingRequests();
+			await expect(resumedSync).resolves.toBe(true);
+			expect(harness.api.trustedClock.offsetMs).toBe(90_000);
+			const expectedCode = await harness.api.otpCalculator.calculateCurrentOTP(secret);
+			expect(expectedCode).not.toBe(initialCode);
+			await vi.waitFor(() => expect(elements['otp-automatic'].textContent).toBe(expectedCode));
+			expect(elements['otp-hotp'].textContent).toBe(initialHOTP.current);
+			expect(harness.api.getOtpEngine().readCommitted('hotp')).toBe(initialHOTP);
+			expect(elements['progress-automatic'].style.width).toBeDefined();
+			expect(JSON.parse(harness.localStorage.values.get(STORAGE_KEY)).offsetMs).toBe(90_000);
+			expectSilentClockUI(harness, elements);
+		},
+	);
 
 	it('uses corrected time for 30/60 second TOTP windows and countdown progress', () => {
 		const correctedSeconds = 1_800_000_075;

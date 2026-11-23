@@ -1,7 +1,9 @@
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 
+import { getI18nCode } from '../../src/ui/scripts/i18n.js';
 import { getCoreCode } from '../../src/ui/scripts/core.js';
+import { getStateCode } from '../../src/ui/scripts/state.js';
 
 const TEST_SECRET = {
 	id: 'test',
@@ -17,19 +19,20 @@ function createHarness(overrides = {}) {
 	const context = {
 		URL,
 		URLSearchParams,
-		secrets: [secret],
+		initialSecrets: [secret],
 		document: { addEventListener: vi.fn() },
 		window: {
 			addEventListener: vi.fn(),
 			location: { origin: 'https://custom.example:8443' },
 		},
-		navigator: { clipboard: { writeText } },
+		navigator: { language: 'zh-CN', clipboard: { writeText } },
 		console: { error: vi.fn(), log: vi.fn(), warn: vi.fn() },
 		setInterval: vi.fn(),
 		showCenterToast,
 	};
 
-	runInNewContext(getCoreCode(), context);
+	runInNewContext(getI18nCode() + getStateCode() + 'replaceSecretRecords(initialSecrets);' + getCoreCode(), context);
+	context.getRecords = () => runInNewContext('accountStore.getRecords()', context);
 	return { api: context, secret, showCenterToast, writeText };
 }
 
@@ -148,6 +151,7 @@ describe('OTP link copying', () => {
 		secret.counter = 4294967297;
 		secret.algorithm = 'SHA512';
 		secret.digits = 8;
+		api.replaceSecretRecords([secret]);
 		await api.copyOTPPageURL('test');
 
 		expect(Object.fromEntries(copiedURL(writeText).searchParams)).toEqual({
@@ -157,6 +161,27 @@ describe('OTP link copying', () => {
 			digits: '8',
 		});
 		expect(secret.counter).toBe(4294967297);
+	});
+
+	it.each(['', '   '])('labels a URI for the legacy blank name %j like its card', async (name) => {
+		const { api, showCenterToast, writeText } = createHarness({ name });
+
+		await api.copyOTPAuthURL('test');
+
+		const url = copiedURL(writeText);
+		expect(decodeURIComponent(url.pathname)).toBe('/未命名:owner@example.com');
+		expect(url.searchParams.get('issuer')).toBe('未命名');
+		expect(showCenterToast).toHaveBeenCalledWith(expect.any(String), expect.stringContaining('未命名'));
+		// The saved account keeps its blank name.
+		expect(api.getRecords()[0].name).toBe(name);
+	});
+
+	it('names a legacy blank-named account in the copied-link notice', async () => {
+		const { api, showCenterToast } = createHarness({ name: ' ' });
+
+		await api.copyOTPPageURL('test');
+
+		expect(showCenterToast).toHaveBeenCalledWith(expect.any(String), expect.stringContaining('未命名'));
 	});
 
 	it.each(['copyOTPAuthURL', 'copyOTPPageURL'])('%s does not write when the secret no longer exists', async (method) => {
@@ -172,10 +197,10 @@ describe('OTP link copying', () => {
 		const { api, showCenterToast, writeText } = createHarness();
 		writeText.mockRejectedValueOnce(new Error('Clipboard permission denied'));
 
-		await expect(api[method]('test')).resolves.toBeUndefined();
+		await expect(api[method]('test')).resolves.toMatchObject({ clipboard: 'failed', reason: 'clipboard-failed' });
 
 		expect(writeText).toHaveBeenCalledTimes(1);
 		expect(showCenterToast).toHaveBeenCalledTimes(1);
-		expect(showCenterToast).toHaveBeenCalledWith('❌', expect.stringContaining('Clipboard permission denied'));
+		expect(showCenterToast).toHaveBeenCalledWith('❌', expect.stringContaining('失败'));
 	});
 });

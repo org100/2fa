@@ -7,7 +7,6 @@ export function getWorkspaceStyles() {
       --workspace-hover: #f0f0f0;
       --workspace-selected: #eff6fc;
       --workspace-brand: #0f6cbd;
-      --workspace-warning: #8a3707;
       --workspace-text: #242424;
       --workspace-muted: #616161;
       --workspace-line: #e0e0e0;
@@ -69,7 +68,6 @@ export function getWorkspaceStyles() {
       --workspace-hover: #383838;
       --workspace-selected: #20384c;
       --workspace-brand: #62abf5;
-      --workspace-warning: #f5b894;
       --workspace-text: #ffffff;
       --workspace-muted: #bdbdbd;
       --workspace-line: #424242;
@@ -81,11 +79,11 @@ export function getWorkspaceStyles() {
       background: var(--workspace-bg);
       color-scheme: dark;
     }
-    .fluent-app > .container { max-width: 1400px; }
+    .fluent-app > .container, .fluent-app > :where(#officialThemeRoot) > .container { max-width: 1400px; }
     .fluent-app .content { padding: 24px 24px 40px; text-align: left; }
-    .fluent-app .search-section { margin-bottom: 24px; }
-    .fluent-app .clock-warning { background: var(--workspace-surface); border: 1px solid var(--workspace-line); border-left: 3px solid var(--workspace-warning); border-radius: 4px; }
-    .fluent-app .clock-warning-icon { color: var(--workspace-warning); display: flex; }
+    /* The search row stays at the top while the accounts scroll beneath it. Its padding sits in the
+       content's own padding, so the page is laid out as before; the backdrop repeats the page's. */
+    .fluent-app .search-section { position: sticky; top: 0; z-index: 20; margin: -12px 0 12px; padding: 12px 0; background: var(--workspace-bg) var(--2fa-background-image, none) center / cover fixed; }
     .fluent-app .search-action-row { gap: 12px; }
     .fluent-app .search-input-wrapper { border: 1px solid var(--search-border); border-bottom-color: #8a8a8a; border-radius: 4px; }
     .fluent-app .search-input-wrapper:focus-within { border-color: var(--workspace-brand); box-shadow: inset 0 -1px var(--workspace-brand); }
@@ -149,7 +147,7 @@ export function getWorkspaceStyles() {
     .fluent-app .progress-top-fill { background: var(--progress-fill); }
     .fluent-app .main-action-button { --action-btn-shadow: 0 2px 8px #00000026; background: #8e44ad; border: 1px solid #8e44ad; border-radius: 50%; color: #fff; box-shadow: var(--action-btn-shadow); transition: background .12s ease, transform .16s ease; }
     .fluent-app .main-action-button:hover { background: #7d3c98; border-color: #7d3c98; box-shadow: 0 2px 8px #00000026; transform: none; }
-    .fluent-app .main-action-button.active { transform: none; background: #7d3c98; border-color: #7d3c98; }
+    .fluent-app .main-action-button.active, .fluent-app .main-action-button.active:hover { transform: none; background: #7d3c98; border-color: #7d3c98; }
     .fluent-app .main-action-button .dialog-icon { width: 24px; height: 24px; transition: transform .16s ease; }
     .fluent-app .main-action-button.active .dialog-icon { transform: rotate(45deg); }
     .fluent-app .action-submenu { padding: 4px; }
@@ -170,7 +168,7 @@ export function getWorkspaceStyles() {
     .fluent-app :is(.search-clear,.sort-trigger,.card-menu-trigger,.menu-item,.submenu-item,.main-action-button,.otp-code,.otp-next-container,.workspace-action):focus-visible { outline: 2px solid var(--workspace-brand); outline-offset: 3px; }
     @media (max-width: 768px) {
       .fluent-app .content { padding: 16px 16px 32px; }
-      .fluent-app .search-section { margin-bottom: 20px; }
+      .fluent-app .search-section { margin-bottom: 8px; }
       .fluent-app .search-input { font-size: 16px; }
       .fluent-app .search-input, .fluent-app .search-icon, .fluent-app .search-clear { height: 42px; }
       .fluent-app .sort-trigger { height: 44px; width: 44px; }
@@ -191,5 +189,5 @@ export function getWorkspaceStyles() {
     @media (prefers-reduced-motion: reduce) {
       .fluent-app .secret-card, .fluent-app .main-action-button, .fluent-app .main-action-button .dialog-icon { transition: none; }
     }
-  `;
+  `.replace(/\.fluent-app(?=\s+(?:[.#:]|\[|[a-zA-Z*>+~]))/g, ':where(.fluent-app)');
 }

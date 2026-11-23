@@ -3,6 +3,16 @@ import { describe, expect, it } from 'vitest';
 import { createMainPage } from '../../src/ui/page.js';
 
 describe('settings page copy', () => {
+	it('keeps account security settings without the removed device authorization entry', async () => {
+		const response = await createMainPage({ lazyLoad: false });
+		const html = await response.text();
+
+		expect(html).toContain('id="settingsCurrentPassword"');
+		expect(html).not.toContain('href="/devices"');
+		expect(html).not.toContain('浏览器扩展设备');
+		expect(html).not.toContain('管理扩展设备授权');
+	});
+
 	it('explains that the default export format also applies to newly created backups', async () => {
 		const response = await createMainPage({ lazyLoad: false });
 		const html = await response.text();
@@ -11,15 +21,14 @@ describe('settings page copy', () => {
 		expect(html).not.toContain('不会改变内部备份的完整格式');
 	});
 
-	it('renders an accessible clock warning with a manual retry action', async () => {
+	it('keeps clock synchronization in the background without a warning or retry action', async () => {
 		const response = await createMainPage({ lazyLoad: false });
 		const html = await response.text();
 
-		expect(html).toContain('id="clockWarning"');
-		expect(html).toContain('aria-live="polite"');
-		expect(html).toContain('id="clockWarningText"');
-		expect(html).toContain('id="clockSyncRetryButton"');
-		expect(html).toContain('onclick="retryClockSync()"');
+		expect(html).not.toContain('id="clockWarning"');
+		expect(html).not.toContain('id="clockWarningText"');
+		expect(html).not.toContain('id="clockSyncRetryButton"');
+		expect(html).not.toContain('retryClockSync');
 	});
 
 	it('renders accessible automatic grouping and flat view controls', async () => {

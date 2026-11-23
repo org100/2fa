@@ -1,92 +1,10 @@
+import { getCardProgressStyles } from './progress.js';
+
 /**
  * 组件样式模块
  */
 export function getComponentStyles() {
-	return `    .clock-warning {
-      margin: 0 0 12px;
-      padding: 10px 12px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      background: var(--warning-light);
-      border: 1px solid var(--warning);
-      border-left: 3px solid var(--warning-dark);
-      border-radius: var(--radius-sm);
-      color: var(--text-primary);
-      line-height: 1.45;
-    }
-
-    .clock-warning[hidden] {
-      display: none;
-    }
-
-    .clock-warning-message {
-      display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      flex: 1 1 auto;
-      min-width: 0;
-    }
-
-    .clock-warning-icon {
-      flex: 0 0 auto;
-      font-size: 15px;
-      line-height: 1.4;
-    }
-
-    .clock-warning-text {
-      min-width: 0;
-      font-size: 13px;
-      overflow-wrap: anywhere;
-    }
-
-    .clock-sync-retry-button {
-      min-height: 32px;
-      flex: 0 0 auto;
-      padding: 6px 10px;
-      border: 1px solid var(--warning-dark);
-      border-radius: 4px;
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      font-size: 12px;
-      font-weight: 600;
-      line-height: 1;
-      white-space: nowrap;
-      cursor: pointer;
-      transition: background 0.2s ease, border-color 0.2s ease;
-    }
-
-    .clock-sync-retry-button:hover {
-      background: var(--bg-hover);
-    }
-
-    .clock-sync-retry-button:focus-visible {
-      outline: 2px solid var(--border-focus);
-      outline-offset: 2px;
-    }
-
-    .clock-sync-retry-button:disabled {
-      cursor: wait;
-      opacity: 0.65;
-    }
-
-    @media (max-width: 480px) {
-      .clock-warning {
-        padding: 10px;
-        gap: 8px;
-      }
-
-      .clock-warning-message {
-        gap: 7px;
-      }
-
-      .clock-sync-retry-button {
-        min-height: 44px;
-        padding: 8px 10px;
-      }
-    }
-
-    .secrets-list,
+	return `    .secrets-list,
     .service-group-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -717,24 +635,7 @@ export function getComponentStyles() {
       transition: width 1s ease-in-out;
     }
 
-    .progress-top {
-      height: var(--progress-height);
-      background: transparent;
-      border-radius: 0;
-      overflow: hidden;
-      position: absolute;
-      top: -1px;
-      left: var(--radius-lg);
-      right: var(--radius-lg);
-    }
-
-    .progress-top-fill {
-      height: 100%;
-      background: var(--progress-fill);
-      border-radius: 0;
-      transition: width 1s linear, background-color 0.5s ease;
-      width: 0%;
-    }
+${getCardProgressStyles()}
 
     /* ========== 同步目标卡片 ========== */
     .dest-card {
@@ -927,6 +828,21 @@ export function getComponentStyles() {
       color: var(--footer-link-hover);
     }
 
+    .footer-button {
+      padding: 0;
+      border: 0;
+      background: none;
+      font-family: inherit;
+      line-height: inherit;
+      cursor: pointer;
+    }
+
+    .footer-button:focus-visible {
+      outline: 2px solid var(--border-focus);
+      outline-offset: 4px;
+      border-radius: 2px;
+    }
+
     .github-icon {
       vertical-align: middle;
       width: 14px;
@@ -1008,6 +924,46 @@ export function getComponentStyles() {
       font-size: 14px;
       font-weight: 600;
     }
+
+    .offline-queue {
+      margin: 0 0 16px;
+      padding: 12px 16px;
+      color: var(--text-primary);
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-primary);
+      border-radius: var(--radius-md);
+      font-size: 14px;
+    }
+
+    .offline-queue[hidden], .offline-queue [hidden] { display: none; }
+    .offline-queue-header, .offline-queue-list li {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+    }
+    .offline-queue-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .offline-queue .btn {
+      width: auto;
+      flex: 0 0 auto;
+      min-height: 32px;
+      margin: 0;
+      padding: 6px 10px;
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--text-primary);
+      background: var(--bg-primary);
+      border: 1px solid var(--border-primary);
+      border-radius: var(--radius-sm);
+      box-shadow: none;
+    }
+    .offline-queue .btn:hover { background: var(--bg-secondary); }
+    .offline-queue-list { list-style: none; margin: 12px 0 0; padding: 0; }
+    .offline-queue-list li { padding: 10px 0; border-top: 1px solid var(--border-primary); }
+    .offline-queue-label { flex: 1; min-width: 140px; overflow-wrap: anywhere; }
+    .offline-queue-label time { display: block; color: var(--text-secondary); font-size: 12px; margin-top: 4px; }
+    #offlineQueueFeedback { margin: 8px 0 0; }
 
     /* 离线模式下的页面样式调整 */
     body.offline-mode {

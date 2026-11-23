@@ -283,9 +283,37 @@ export function getDialogStyles() {
     .modal .settings-tabs { width: 164px; padding: 8px 12px; background: var(--dialog-subtle); }
     .modal .settings-tab { position: relative; width: 100%; border: 0; border-radius: 4px; background: transparent; color: var(--dialog-text); padding: 10px 12px; min-height: 40px; margin-bottom: 4px; text-align: left; font: inherit; }
     .modal .settings-tab.active { background: var(--dialog-hover); font-weight: 600; }
+    .modal .settings-tab-text { white-space: normal; overflow: visible; overflow-wrap: anywhere; hyphens: auto; }
     .modal .settings-tab.active::before { content: ''; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px; border-radius: 2px; background: var(--dialog-brand); }
     .modal .settings-content { padding: 8px 24px 24px; }
-    .modal .settings-modal-actions { display: flex; flex-shrink: 0; justify-content: flex-end; padding: 16px 24px; background: var(--dialog-subtle); border-top: 1px solid var(--dialog-line); }
+    .modal .settings-code-toolbar { position: sticky; top: 0; z-index: 3; padding: 8px 0; background: var(--dialog-surface); border-bottom: 1px solid var(--dialog-line); }
+    .modal .settings-code-toolbar:has(#settingsCustomCodeResult:empty):not(:has(button:not([hidden]))) { display: none; }
+    .modal .settings-code-actions { margin: 0; }
+    .modal .settings-code-add-actions { margin-top: 12px; }
+    .modal .settings-code-list { display: grid; gap: 8px; margin-top: 12px; }
+    .modal .settings-code-item { min-width: 0; border: 1px solid var(--dialog-line); border-radius: 6px; background: var(--dialog-surface); scroll-margin-top: 120px; }
+    .modal .settings-code-item-header { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 4px 8px; }
+    .modal .settings-code-summary { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 44px; padding: 8px 4px; border: 0; border-radius: 4px; background: transparent; color: var(--dialog-text); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+    .modal .settings-code-summary::before { content: ''; flex: none; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); }
+    .modal .settings-code-summary[aria-expanded="true"]::before { transform: rotate(45deg); }
+    .modal .settings-code-summary:hover { background: var(--dialog-hover); }
+    .modal .settings-code-summary:focus-visible { outline: 2px solid var(--dialog-brand); outline-offset: 1px; }
+    .modal .settings-code-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .modal .settings-code-body { display: grid; gap: 8px; padding: 12px; border-top: 1px solid var(--dialog-line); }
+    .modal .settings-code-body[hidden] { display: none; }
+    .modal .settings-code-label { display: grid; gap: 6px; font-size: var(--dialog-caption-size); color: var(--dialog-muted); }
+    .modal .settings-code-name { width: 100%; min-width: 0; }
+    .modal .settings-code-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; cursor: pointer; white-space: nowrap; font-size: var(--dialog-caption-size); }
+    .modal .settings-code-toggle input { flex: none; appearance: none; position: relative; width: 32px; height: 18px; margin: 0; border: 1px solid var(--dialog-stroke); border-radius: 12px; background: var(--dialog-subtle); cursor: pointer; }
+    .modal .settings-code-toggle input::before { content: ''; position: absolute; width: 12px; height: 12px; top: 2px; left: 2px; border-radius: 50%; background: var(--dialog-muted); transition: transform .12s ease; }
+    .modal .settings-code-toggle input:checked { background: var(--dialog-brand); border-color: var(--dialog-brand); }
+    .modal .settings-code-toggle input:checked::before { transform: translateX(14px); background: #fff; }
+    .modal .settings-code-toggle input:focus-visible { outline: 2px solid var(--dialog-brand); outline-offset: 3px; }
+    .modal .settings-code-remove { min-width: 44px; padding: 6px 8px; color: var(--dialog-danger); }
+    .modal .settings-code-editor { min-height: 220px; width: 100%; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; line-height: 1.6; }
+    .modal .settings-code-empty { margin: 16px 0; padding: 20px 12px; border: 1px dashed var(--dialog-line); border-radius: 6px; text-align: center; }
+    .modal .settings-code-empty[hidden] { display: none; }
+    .modal .settings-modal-actions { display: flex; flex-shrink: 0; align-items: center; justify-content: flex-end; gap: 8px; padding: 16px 24px; background: var(--dialog-subtle); border-top: 1px solid var(--dialog-line); }
     .modal .settings-section-title { font-size: var(--dialog-body-size); }
     .modal .settings-desc { font-size: var(--dialog-caption-size); }
     .modal .settings-panel[data-panel="sync"] .settings-section { margin: 0; }
@@ -419,11 +447,32 @@ export function getDialogStyles() {
     .modal #generatedQRCode { max-width: 100% !important; height: auto; }
     .modal .loading-backup, .modal .no-backups { font-size: var(--dialog-caption-size); font-style: normal; }
     .modal .loading-backup::before { content: ''; width: 18px; height: 18px; border: 2px solid var(--dialog-line); border-top-color: var(--dialog-brand); border-radius: 50%; }
-    .dialog-toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 100020; display: flex; align-items: center; gap: 10px; padding: 12px 16px; max-width: calc(100vw - 32px); border: 1px solid var(--dialog-line); border-radius: 6px; background: var(--dialog-surface); box-shadow: var(--dialog-shadow); }
+    .dialog-toast { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 100020; display: flex; align-items: center; gap: 10px; padding: 12px 16px; max-width: calc(100vw - 32px); border: 1px solid var(--dialog-line); border-radius: 6px; background: var(--dialog-surface); box-shadow: var(--dialog-shadow); }
     .dialog-spinner { width: 16px; height: 16px; flex-shrink: 0; border: 2px solid var(--dialog-line); border-top-color: var(--dialog-brand); border-radius: 50%; animation: spin .8s linear infinite; }
     .center-toast .toast-content { background: var(--dialog-surface); border: 1px solid var(--dialog-line); border-radius: 6px; box-shadow: var(--dialog-shadow); padding: 16px 24px; gap: 12px; backdrop-filter: none; text-align: left; }
     .center-toast .toast-icon { display: flex; color: var(--dialog-brand); margin: 0; }
     .center-toast .toast-message { color: var(--dialog-text); font-size: var(--dialog-body-size); font-weight: 400; }
+    .modal .extension-description { margin: 0 0 8px; }
+    .modal .extension-caption { margin: 0; color: var(--dialog-muted); font-size: var(--dialog-caption-size); line-height: 1.6; }
+    .modal .extension-store-links { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 20px 0 24px; }
+    .modal .extension-store-link { display: flex; align-items: center; justify-content: center; text-decoration: none; text-align: center; }
+    .modal .extension-connection { padding-top: 20px; border-top: 1px solid var(--dialog-line); }
+    .modal .extension-instance-label { display: block; margin-bottom: 8px; font-weight: 600; }
+    .modal .extension-instance-controls { display: flex; gap: 8px; }
+    .modal .extension-instance-controls input { flex: 1; min-width: 0; }
+    .modal .extension-instance-controls .btn { flex: 0 0 auto; }
+    .modal .extension-copy-status { min-height: 24px; padding-top: 4px; }
+    .modal .extension-help-links { margin-top: 16px; font-size: var(--dialog-caption-size); }
+    .modal .extension-help-links a { color: var(--dialog-brand); text-underline-offset: 3px; }
+    .modal .extension-help-links a:hover { color: var(--dialog-brand-hover); }
+    @media (max-width: 480px) {
+      .modal .extension-store-links { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+    }
+    @media (max-width: 400px) {
+      .modal .extension-store-links { gap: 8px; }
+      .modal .extension-instance-controls { flex-wrap: wrap; }
+      .modal .extension-instance-controls input { flex-basis: 100%; }
+    }
     @media (max-width: 768px) {
       .modal { --dialog-title-size: 18px; }
       .modal:not(.confirm-dialog-modal) { align-items: center; padding: 16px; }
@@ -447,11 +496,13 @@ export function getDialogStyles() {
       .modal .settings-tabs { width: auto; padding: 0 12px 12px; background: var(--dialog-surface); gap: 4px; }
       .modal .settings-layout { flex-direction: column; }
       .modal .settings-tabs { display: flex; flex-shrink: 0; border-right: 0; }
-      .modal .settings-tab { flex: 1; }
-      .modal .settings-tab-text { display: inline; }
+      .modal .settings-tab { flex: 1 0 auto; width: auto; min-width: 0; }
+      .modal .settings-tab-text { display: inline; white-space: nowrap; }
       .modal .settings-tab { padding: 8px 10px; justify-content: center; border: 0; margin: 0; font-size: var(--dialog-body-size); }
       .modal .settings-tab.active::before { left: 12px; right: 12px; top: auto; bottom: 0; height: 3px; width: auto; }
       .modal .settings-content { padding: 8px 20px 20px; }
+      .modal .settings-code-item-header { gap: 6px; padding: 4px 6px; }
+      .modal .settings-code-toggle span { display: none; }
       .modal .settings-modal-actions { padding: 14px 20px max(14px, env(safe-area-inset-bottom)); }
       .modal .settings-tab-icon { display: none; }
       .modal .sync-card-header { gap: 8px; }

@@ -14,20 +14,26 @@ export function getUtilsCode() {
     // ========== 工具函数模块 ==========
 
     // ==================== 第三方脚本按需加载 ====================
-    // jsQR (~130KB) 和 qrcode-generator (~20KB) 改为按需加载，
+    // jsQR (~250KB) 和 qrcode-generator (~20KB) 改为按需加载，
     // 仅在用户点开扫码/生成二维码相关功能时才下载，避免阻塞首屏。
+    // 固定版本原始字节由主机提供，并保留原 SRI；完整离线快照会预取这两个依赖。
+    const JSQR_URL = '/vendor/jsqr-1.4.0.js';
+    const JSQR_INTEGRITY = 'sha384-b5Ya4Bq3qCyz39m2ISh+4DxjAIljdeFwK/BsXLuj9gugaNwAcj/ia15fxNZL9Nlx';
+    const QRCODE_GENERATOR_URL = '/vendor/qrcode-generator-1.4.4.js';
+    const QRCODE_GENERATOR_INTEGRITY = 'sha384-mZT2gIty7ZDdOGkxfP6joZcYdMW1Jvj9dRlfpTmaJAKKXTqzygtB22k7FLe+KZC1';
     const __scriptLoadCache = new Map();
-    function loadScriptOnce(url) {
+    function loadScriptOnce(url, integrity) {
       if (__scriptLoadCache.has(url)) return __scriptLoadCache.get(url);
       const promise = new Promise((resolve, reject) => {
         const s = document.createElement('script');
         s.src = url;
         s.async = true;
         s.crossOrigin = 'anonymous';
+        if (integrity) s.integrity = integrity;
         s.onload = () => resolve();
         s.onerror = () => {
           __scriptLoadCache.delete(url); // 失败后允许下次重试
-          reject(new Error('脚本加载失败: ' + url));
+          reject(new Error(t('scriptLoadFailed', { url })));
         };
         document.head.appendChild(s);
       });
@@ -36,17 +42,18 @@ export function getUtilsCode() {
     }
     async function ensureJsQR() {
       if (typeof jsQR !== 'undefined') return;
-      await loadScriptOnce('https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js');
+      await loadScriptOnce(JSQR_URL, JSQR_INTEGRITY);
     }
     async function ensureQRCodeGen() {
       if (typeof qrcode !== 'undefined') return;
-      await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js');
+      await loadScriptOnce(QRCODE_GENERATOR_URL, QRCODE_GENERATOR_INTEGRITY);
     }
     // 暴露到 window 供懒加载模块（lazy modules）共享
     window.ensureJsQR = ensureJsQR;
     window.ensureQRCodeGen = ensureQRCodeGen;
 
     // ==================== 模态框通用函数 ====================
+    const modalAnimationTimers = new WeakMap();
 
     /**
      * 通用显示模态框函数
@@ -59,12 +66,17 @@ export function getUtilsCode() {
         console.error('模态框不存在:', modalId);
         return;
       }
+      const returnFocus = document.activeElement;
+      const wasOpen = modal.style.display === 'flex' && !modal.inert;
+      clearTimeout(modalAnimationTimers.get(modal));
+      modal.inert = false;
       modal.style.display = 'flex';
-      setTimeout(() => modal.classList.add('show'), 10);
-      disableBodyScroll();
+      modalAnimationTimers.set(modal, setTimeout(() => modal.classList.add('show'), 10));
+      if (!wasOpen) disableBodyScroll();
       if (typeof onShow === 'function') {
         onShow();
       }
+      if (typeof trackModalOpen === 'function') trackModalOpen(modal, returnFocus);
     }
 
     /**
@@ -79,16 +91,19 @@ export function getUtilsCode() {
         return;
       }
       // 幂等守卫：未显示的 modal 不做任何事，避免 body 锁计数被错误减少
-      if (!modal.classList.contains('show')) {
+      if (modal.inert || (!modal.classList.contains('show') && modal.style.display !== 'flex')) {
         return;
       }
+      clearTimeout(modalAnimationTimers.get(modal));
+      if (typeof trackModalClosed === 'function') trackModalClosed(modal);
+      modal.inert = true;
       modal.classList.remove('show');
-      setTimeout(() => {
+      modalAnimationTimers.set(modal, setTimeout(() => {
         modal.style.display = 'none';
         if (typeof onHide === 'function') {
           onHide();
         }
-      }, 300);
+      }, 300));
       enableBodyScroll();
     }
 
@@ -109,13 +124,27 @@ export function getUtilsCode() {
      * 否则会重复绑定监听、一次点击触发多个 resolve，调用侧(删除/还原)可能重复提交请求。
      */
     let __confirmDialogBusy = false;
+    let confirmDialogTextState = null;
+
+    function refreshConfirmDialogLanguage() {
+      if (!confirmDialogTextState) return;
+      const opts = confirmDialogTextState;
+      const keys = opts.i18n || {};
+      const defaults = { title: 'confirmActionTitle', confirmText: 'confirm', cancelText: 'cancel' };
+      const textFor = field => keys[field] ? t(keys[field], keys.params || {}) : (opts[field] || (defaults[field] ? t(defaults[field]) : ''));
+      document.getElementById('confirmDialogTitle').textContent = textFor('title');
+      const message = document.getElementById('confirmDialogMessage');
+      message.replaceChildren();
+      String(textFor('message')).split('\\n').forEach((line, index) => {
+        if (index > 0) message.appendChild(document.createElement('br'));
+        message.appendChild(document.createTextNode(line));
+      });
+      document.getElementById('confirmDialogCancel').textContent = textFor('cancelText');
+      document.getElementById('confirmDialogConfirm').textContent = textFor('confirmText');
+    }
 
     function showConfirmDialog(options) {
       const opts = options || {};
-      const title = opts.title || '确认操作';
-      const message = opts.message || '';
-      const confirmText = opts.confirmText || '确认';
-      const cancelText = opts.cancelText || '取消';
       const danger = opts.danger === true;
 
       // 若已有确认框在等待用户操作，直接以 "取消" 语义返回，避免监听器叠加
@@ -123,6 +152,7 @@ export function getUtilsCode() {
         return Promise.resolve(false);
       }
       __confirmDialogBusy = true;
+      confirmDialogTextState = opts;
 
       return new Promise((resolve) => {
         // 懒创建 DOM，后续复用同一节点
@@ -151,22 +181,12 @@ export function getUtilsCode() {
           document.body.appendChild(modal);
         }
 
-        const titleEl = modal.querySelector('#confirmDialogTitle');
-        const messageEl = modal.querySelector('#confirmDialogMessage');
         const iconEl = modal.querySelector('#confirmDialogIcon');
         const cancelBtn = modal.querySelector('#confirmDialogCancel');
         const confirmBtn = modal.querySelector('#confirmDialogConfirm');
 
-        titleEl.textContent = title;
-        // 支持多行：将 \\n 渲染为换行
-        messageEl.innerHTML = '';
-        String(message).split('\\n').forEach((line, idx) => {
-          if (idx > 0) messageEl.appendChild(document.createElement('br'));
-          messageEl.appendChild(document.createTextNode(line));
-        });
+        refreshConfirmDialogLanguage();
         iconEl.innerHTML = dialogIcon(danger ? 'warning' : 'info');
-        cancelBtn.textContent = cancelText;
-        confirmBtn.textContent = confirmText;
         confirmBtn.classList.toggle('btn-danger', danger);
         modal.setAttribute('aria-labelledby', 'confirmDialogTitle');
         modal.setAttribute('aria-describedby', 'confirmDialogMessage');
@@ -181,6 +201,9 @@ export function getUtilsCode() {
         function cleanup(result) {
           if (settled) return;
           settled = true;
+          confirmDialogTextState = null;
+          clearTimeout(modalAnimationTimers.get(modal));
+          if (typeof trackModalClosed === 'function') trackModalClosed(modal);
           modal.classList.remove('show');
           document.removeEventListener('keydown', onKey);
           cancelBtn.removeEventListener('click', onCancel);
@@ -239,10 +262,12 @@ export function getUtilsCode() {
 
         disableBodyScroll();
         modal.style.display = 'flex';
-        setTimeout(() => {
+        modal.inert = false;
+        if (typeof trackModalOpen === 'function') trackModalOpen(modal, previouslyFocused);
+        modalAnimationTimers.set(modal, setTimeout(() => {
           modal.classList.add('show');
           try { focusTarget.focus(); } catch (_) { /* noop */ }
-        }, 10);
+        }, 10));
       });
     }
 
@@ -288,14 +313,15 @@ export function getUtilsCode() {
 
     /**
      * 转义HTML内容，防止XSS攻击
+     * 同时转义引号，结果既可用于元素文本，也可用于带引号的属性值（alt、title、aria-label 等）。
+     * 与服务端 backup-format 的 escapeHtml/decodeHtmlEntities 使用同一组实体。
      * @param {string} str - 要转义的字符串
      * @returns {string} 转义后的字符串
      */
     function escapeHTML(str) {
       if (typeof str !== 'string') return str;
-      const div = document.createElement('div');
-      div.textContent = str;
-      return div.innerHTML;
+      const entities = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+      return str.replace(/[&<>"']/g, character => entities[character]);
     }
 
     /**
@@ -399,27 +425,27 @@ export function getUtilsCode() {
 
           if (ext === 'json' || ext === '2fas') {
             types.push({
-              description: 'JSON 文件',
+              description: t('fileTypeJson'),
               accept: { 'application/json': ['.json', '.2fas'] }
             });
           } else if (ext === 'csv') {
             types.push({
-              description: 'CSV 文件',
+              description: t('fileTypeCsv'),
               accept: { 'text/csv': ['.csv'] }
             });
           } else if (ext === 'html' || ext === 'htm') {
             types.push({
-              description: 'HTML 文件',
+              description: t('fileTypeHtml'),
               accept: { 'text/html': ['.html', '.htm'] }
             });
           } else if (ext === 'txt') {
             types.push({
-              description: '文本文件',
+              description: t('fileTypeText'),
               accept: { 'text/plain': ['.txt'] }
             });
           } else if (ext === 'xml') {
             types.push({
-              description: 'XML 文件',
+              description: t('fileTypeXml'),
               accept: { 'application/xml': ['.xml'] }
             });
           }
@@ -506,11 +532,11 @@ export function getUtilsCode() {
           try {
             await ensureQRCodeGen();
           } catch (loadErr) {
-            throw new Error('QR码生成库加载失败');
+            throw new Error(t('qrLibraryLoadFailed'));
           }
         }
         if (typeof qrcode === 'undefined') {
-          throw new Error('QR码生成库未加载');
+          throw new Error(t('qrLibraryNotLoaded'));
         }
 
         // 使用qrcode-generator库在客户端生成QR码
@@ -556,7 +582,7 @@ export function getUtilsCode() {
 
       } catch (error) {
         console.error('❌ 客户端QR码生成失败:', error);
-        throw new Error('QR码生成失败: ' + error.message);
+        throw new Error(t('qrGenerationFailed', { error: error.message }));
       }
     }
 
@@ -573,7 +599,7 @@ export function getUtilsCode() {
         // 主路径：直接触发懒加载（受 maxWaitTime 限制）
         await Promise.race([
           ensureQRCodeGen(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('QR码库加载超时')), maxWaitTime)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error(t('qrLibraryTimeout'))), maxWaitTime)),
         ]);
       } catch (err) {
         // 兜底：可能脚本由其他途径正在加载，再轮询一次

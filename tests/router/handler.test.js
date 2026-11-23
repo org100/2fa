@@ -294,6 +294,7 @@ describe('Router Handler', () => {
       const response = await handleRequest(request, env);
 
       expect(response.status).toBe(401);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
     });
 
     it('未配置 KV 存储时应该返回 503', async () => {
@@ -496,7 +497,7 @@ describe('Router Handler', () => {
 
       const response = await handleRequest(request, env);
 
-      expect(handleGetSecrets).toHaveBeenCalledWith(env);
+      expect(handleGetSecrets).toHaveBeenCalledWith(env, request);
       expect(response.status).toBe(200);
     });
 
@@ -649,6 +650,18 @@ describe('Router Handler', () => {
 			expect(response.status).toBe(405);
 			expect(handleCompactHOTPCounters).not.toHaveBeenCalled();
 		});
+
+    it.each(['PUT', 'DELETE'])('应该拒绝多层密钥路径的 %s 请求', async (method) => {
+      const { handleUpdateSecret, handleDeleteSecret } = await import('../../src/api/secrets/index.js');
+      const request = createMockRequest({ method, pathname: '/api/secrets/extra/test-id' });
+      const env = createMockEnv();
+
+      const response = await handleRequest(request, env);
+
+      expect(response.status).toBe(404);
+      expect(handleUpdateSecret).not.toHaveBeenCalled();
+      expect(handleDeleteSecret).not.toHaveBeenCalled();
+    });
 
     it('应该拒绝 /api/secrets/{id} 缺少 ID', async () => {
       const request = createMockRequest({
@@ -987,7 +1000,7 @@ describe('Router Handler', () => {
 
       const response = await handleRequest(request, env);
 
-      expect(handleGenerateOTP).toHaveBeenCalledWith('', request);
+      expect(handleGenerateOTP).toHaveBeenCalledWith('', request, env);
       expect(response.status).toBe(200);
     });
 
@@ -999,7 +1012,7 @@ describe('Router Handler', () => {
 
       const response = await handleRequest(request, env);
 
-      expect(handleGenerateOTP).toHaveBeenCalledWith('JBSWY3DPEHPK3PXP', request);
+      expect(handleGenerateOTP).toHaveBeenCalledWith('JBSWY3DPEHPK3PXP', request, env);
       expect(response.status).toBe(200);
     });
 
@@ -1013,7 +1026,7 @@ describe('Router Handler', () => {
       const response = await handleRequest(request, env);
 
       // 路由器只从 pathname 提取 secret，查询参数通过 request 传递
-      expect(handleGenerateOTP).toHaveBeenCalledWith('JBSWY3DPEHPK3PXP', request);
+      expect(handleGenerateOTP).toHaveBeenCalledWith('JBSWY3DPEHPK3PXP', request, env);
       expect(response.status).toBe(200);
     });
   });

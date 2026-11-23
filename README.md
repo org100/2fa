@@ -2,13 +2,29 @@
 
 基于 Cloudflare Workers 的两步验证密钥管理系统。免费部署、全球加速、支持 PWA 离线使用。
 
-**[English](README_EN.md)**
+<!-- README_LANGUAGE_NAV_START -->
 
-![Version](https://img.shields.io/badge/version-1.9.0-blue)
+**[简体中文](README.md)** · [繁體中文](docs/zh-TW/README.md) · [English](docs/en/README.md) · [日本語](docs/ja/README.md) · [한국어](docs/ko/README.md) ·
+[Deutsch](docs/de/README.md) · [Français](docs/fr/README.md) · [Español](docs/es/README.md) · [Português (Brasil)](docs/pt-BR/README.md) · [Italiano](docs/it/README.md) ·
+[Русский](docs/ru/README.md) · [Türkçe](docs/tr/README.md) · [Bahasa Indonesia](docs/id/README.md) · [Tiếng Việt](docs/vi/README.md) · [ไทย](docs/th/README.md)
+
+<!-- README_LANGUAGE_NAV_END -->
+
+![Version](https://img.shields.io/badge/version-2.0.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Cloudflare%20Workers-orange)
 
-**主要特性：** TOTP/HOTP 验证码自动生成 · 二维码扫描/图片识别/粘贴截图/拖拽图片添加密钥 · AES-GCM 256 位加密存储 · 从 Google Authenticator、Aegis、2FAS、Bitwarden 等应用批量导入 · 多格式导出（TXT/JSON/CSV/HTML/Google 迁移二维码） · 自动备份与还原 · WebDAV/S3/OneDrive/Google Drive 远程备份同步 · 账户安全/同步/偏好设置 · 浅色/深色/跟随系统主题 · Fluent 2 风格响应式界面
+**主要特性：** TOTP/HOTP 验证码自动生成 · 二维码扫描/图片识别/粘贴截图/拖拽图片添加密钥 · AES-GCM 256 位加密存储 · 从 Google Authenticator、Aegis、2FAS、Bitwarden 等应用批量导入 · 多格式导出（TXT/JSON/CSV/HTML/Google 迁移二维码） · 自动备份与还原 · WebDAV/S3/OneDrive/Google Drive 远程备份同步 · 账户安全/同步/偏好设置 · 项目全模块 15 语支持（自动检测 / 手动切换） · 浅色/深色/跟随系统主题 · Fluent 2 风格响应式界面
+
+网页、浏览器扩展、首次设置、公开 OTP 页面、接口提示及备份文档统一支持：简体中文、繁體中文、English、日本語、한국어、Deutsch、Français、Español、Português (Brasil)、Italiano、Русский、Türkçe、Bahasa Indonesia、Tiếng Việt、ไทย。界面可跟随浏览器或手动选择，未支持的浏览器语言回退英文；不同语言导出的 CSV/HTML 备份可相互导入。
+
+## 🧩 浏览器扩展
+
+安装「2FA 验证助手」：**[Chrome 应用商店](https://chromewebstore.google.com/detail/2fa-%E9%AA%8C%E8%AF%81%E5%8A%A9%E6%89%8B/lifeiloiefdlbohelpjajdbopeocalhl)** · **[Microsoft Edge 商店](https://microsoftedge.microsoft.com/addons/detail/kmchncmoddhdlbpfoejeahdjhieghklm)** · **[Firefox 附加组件商店](https://addons.mozilla.org/zh-CN/firefox/addon/2fa-%E9%AA%8C%E8%AF%81%E5%8A%A9%E6%89%8B/)**。
+
+请使用对应浏览器打开安装链接。安装后，在扩展设置中填写自己的 2FA 实例地址，并在同一浏览器中登录实例，即可查看、复制和填充 TOTP 验证码；自动填充按网站授权，可在首次填充时一并开启。扩展需配合已部署的本项目使用，界面支持上述 15 种语言。Firefox 桌面版与 Android 版均要求 153 及以上版本，并使用普通标签页；不支持桌面容器标签页和两端的隐私标签页。Firefox 附加组件商店自 1.2.0 版起支持 Android，尚未完成 Firefox Android 实机验证。Firefox Android 不提供扩展快捷键。Edge Android 已有用户实测可用。
+
+[安装与使用指南](docs/BROWSER_EXTENSION.md) · [Chrome / Edge 隐私政策](extension/PRIVACY.md) · [Firefox 隐私政策](extension/PRIVACY_FIREFOX.md)
 
 ## 📸 截图预览
 
@@ -66,7 +82,13 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
 工作流会自动保留你当前仓库里的 Worker 名称、KV 绑定和常见部署配置，并重新部署**同一个 Worker**。仓库中已有的工作流文件也会保留。
 
-> **没有 Sync Upstream 入口时**：一键部署创建的仓库可能不包含工作流。此时才需要在自己的仓库中新增 `.github/workflows/sync-upstream.yml`，内容复制自上游文件：<https://github.com/wuzf/2fa/blob/main/.github/workflows/sync-upstream.yml>，并提交一次。之后按上面步骤升级。
+> **没有 Sync Upstream 入口时**：一键部署导入仓库时不会复制 `.github/workflows`，所以新建的仓库里没有这个工作流，第一次升级前要先补上。把下面链接里的 `OWNER/REPO` 换成你的仓库（例如 `alice/2fa`）后在浏览器打开，GitHub 会填好文件名和内容，点 **Commit changes** 即可：
+>
+> ```text
+> https://github.com/OWNER/REPO/new/main?filename=.github/workflows/sync-upstream.yml&value=%23%20Save%20as%20.github%2Fworkflows%2Fsync-upstream.yml%20in%20your%20repository.%0A%23%20The%20upgrade%20steps%20come%20from%20wuzf%2F2fa%2C%20so%20this%20file%20never%20needs%20updating.%0Aname%3A%20Sync%20Upstream%0A%0Aon%3A%0A%20%20workflow_dispatch%3A%0A%20%20%20%20inputs%3A%0A%20%20%20%20%20%20upstream_ref%3A%0A%20%20%20%20%20%20%20%20description%3A%20Upstream%20branch%20or%20tag%20to%20sync%0A%20%20%20%20%20%20%20%20required%3A%20false%0A%20%20%20%20%20%20%20%20default%3A%20main%0A%0Apermissions%3A%0A%20%20contents%3A%20write%0A%0Ajobs%3A%0A%20%20sync%3A%0A%20%20%20%20uses%3A%20wuzf%2F2fa%2F.github%2Fworkflows%2Fsync-upstream.yml%40main%0A%20%20%20%20with%3A%0A%20%20%20%20%20%20upstream_ref%3A%20%24%7B%7B%20inputs.upstream_ref%20%7D%7D%0A
+> ```
+>
+> 也可以手动新建 `.github/workflows/sync-upstream.yml`，内容复制自 <https://github.com/wuzf/2fa/blob/main/.github/sync-upstream-entry.yml>。这个入口只有十几行，升级步骤由上游提供，以后不用再更新它。之后按上面步骤升级。
 
 > **之前因 `without workflows permission` 升级失败**：修复发布到上游 `main` 后，已有自动合并部署配置步骤的 **Sync Upstream** 可以直接按上面步骤升级，无需修改 YAML 或配置 PAT。请选择 `main` 发起新运行，不要选择不含修复的旧版本标签。其他情况见[升级故障排查](docs/DEPLOYMENT.md#升级故障排查)。
 
@@ -104,7 +126,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 - **复制验证码**：直接点击验证码数字
 - **管理密钥**：点击卡片右上角 **⋯** → 查看二维码 / 复制 URI / 复制网页链接 / 编辑 / 删除
 - **搜索**：顶部搜索框按服务名或账户名实时搜索
-- **智能聚合**：默认按服务家族自动聚合，同一服务的多个账户归在一起，也可切换为全部平铺
+- **智能聚合**：默认按服务家族自动聚合，同一服务的多个账户归在一起，也可切换为全部平铺；刷新后的默认显示方式可在偏好设置中固定
 - **排序**：按添加时间或名称排序
 - **主题**：悬浮按钮 → **设置 → 偏好设置 → 主题模式**，选择浅色、深色或跟随系统
 
@@ -165,12 +187,30 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 - **远程备份** — 配置 WebDAV/S3/OneDrive/Google Drive 备份目标
 - **退出登录** — 一键清除当前会话 Cookie 与本地缓存，离线/服务端故障时仍能本地登出
 
+### 主题
+
+点击悬浮按钮 → **⚙️ 设置 → 外观与主题**：
+
+- **更换主题** — 选择官方默认主题或社区主题，在右侧预览，点击 **应用外观** 后生效
+- **导入主题** — 安装自己做好的主题 ZIP，或添加自己的主题目录
+- **制作主题** — 只换配色和布局用 v1（不写 JavaScript）；自己设计整个界面用 v2，从 [主题模板](https://github.com/wuzf/2fa-theme-template) 开始。详见 [自定义主题](docs/THEMES.md)
+
+主题导致页面无法操作时，访问 `https://你的域名/?safeMode=1` 临时停用主题。
+
 ### 安装为手机应用（PWA）
 
 - **iOS**：Safari 打开 → 分享按钮 → 添加到主屏幕
 - **Android**：Chrome 打开 → 菜单（⋮）→ 添加到主屏幕
 
 安装后可像原生应用一样全屏使用，支持离线访问。
+
+### Chrome / Edge / Firefox 验证码辅助填充
+
+在目标网站点击扩展选择账户，或按 `Ctrl+Shift+U` 填入已绑定账户的当前 TOTP。为网站授权后，可在该网站自动检测验证码框并填充；多个账户匹配时显示选择面板。支持单框和 6/8 格输入，不主动提交表单。
+
+扩展使用网页登录会话，支持明确启用离线缓存，均无需保持主网页打开。网页登录模式在后台临时读取密钥，离线模式则在本机保留独立密钥缓存，断网后仍可取码。种子不传给弹窗或目标网站，离线缓存没有额外密码加密。支持开放 Shadow DOM 与同源 iframe；暂不支持 HOTP、跨域 iframe、关闭的 Shadow DOM 或隐私模式。
+
+详见[安装与使用指南](docs/BROWSER_EXTENSION.md)、[Chrome / Edge 隐私说明](extension/PRIVACY.md)及[Firefox 隐私说明](extension/PRIVACY_FIREFOX.md)。
 
 ## 🔒 安全
 
@@ -204,6 +244,9 @@ TOTP 网页同时显示当前和下一个验证码，均可点击复制，到期
 | [架构设计](docs/ARCHITECTURE.md)              | 系统架构与技术实现                                 |
 | [开发指南](docs/DEVELOPMENT.md)               | 本地开发、测试、代码规范                           |
 | [PWA 指南](docs/PWA_GUIDE.md)                 | PWA 安装与离线功能                                 |
+| [浏览器扩展指南](docs/BROWSER_EXTENSION.md)   | Chrome / Edge / Firefox 扩展安装、使用与权限       |
+| [自定义主题](docs/THEMES.md)                  | 安装、切换和制作主题                               |
+| [主题 SDK](docs/THEME_APP_SDK.md)             | 完整前端主题的接口、打包与验收                     |
 
 ## 🤝 参与贡献
 

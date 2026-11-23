@@ -1,7 +1,9 @@
 import { createContext, runInContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMainPage } from '../../src/ui/page.js';
+import { getI18nCode } from '../../src/ui/scripts/i18n.js';
 import { getSettingsCode } from '../../src/ui/scripts/settings.js';
+import { handleGetSettings } from '../../src/api/settings.js';
 
 const html = await (await createMainPage()).text();
 const reply = (data, ok = true) => ({ ok, json: async () => data });
@@ -43,19 +45,26 @@ function createHarness({ settings = { jwtExpiryDays: 30, maxBackups: 100, defaul
 	});
 	const storage = new Map();
 	const context = createContext({
-		document: { getElementById: (id) => elements.get(id), querySelectorAll: () => [] },
+		document: {
+			documentElement: { setAttribute: vi.fn() },
+			getElementById: (id) => elements.get(id),
+			querySelectorAll: () => [],
+		},
+		navigator: { language: 'zh-CN' },
 		localStorage: { getItem: (key) => storage.get(key) || null, setItem: (key, value) => storage.set(key, value) },
 		authenticatedFetch: fetch,
 		getOTPAnimationMode: () => 'none',
 		showCenterToast: vi.fn(),
+		Date,
 		setTimeout,
 		clearTimeout,
 	});
-	runInContext(getSettingsCode(), context);
+	runInContext(getI18nCode() + getSettingsCode(), context);
 	const event = (id, name) => runInContext(elements.get(id).attributes[name], context);
 	return {
 		api: context,
 		settings,
+		storage,
 		fetch,
 		elements,
 		input(id, value) {
@@ -96,8 +105,9 @@ describe('numeric preference autosave', () => {
 		h.input('settingsJwtExpiryDays', '60');
 		await h.blur('settingsJwtExpiryDays');
 		h.input('settingsMaxBackups', '0');
-		await h.enter('settingsMaxBackups');
-		await vi.advanceTimersByTimeAsync(1000);
+		const savingBackups = h.enter('settingsMaxBackups');
+		await vi.advanceTimersByTimeAsync(1100);
+		await savingBackups;
 		expect(h.posts()).toEqual([{ jwtExpiryDays: 60 }, { maxBackups: 0 }]);
 		expect(h.api.event.preventDefault).toHaveBeenCalledOnce();
 		expect(h.elements.get('settingsMaxBackupsResult').textContent).toBe('已保存，备份不限数量');
@@ -172,7 +182,9 @@ describe('numeric preference autosave', () => {
 		await vi.advanceTimersByTimeAsync(500);
 		expect(h.posts()).toEqual([{ jwtExpiryDays: 45 }]);
 		pending[0].resolve(reply({ success: true }));
-		await vi.advanceTimersByTimeAsync(0);
+		await vi.advanceTimersByTimeAsync(1099);
+		expect(h.posts()).toEqual([{ jwtExpiryDays: 45 }]);
+		await vi.advanceTimersByTimeAsync(1);
 		expect(h.posts()).toEqual([{ jwtExpiryDays: 45 }, { jwtExpiryDays: 47 }]);
 		expect(h.elements.get('settingsJwtExpiryDays').value).toBe('47');
 		expect(h.elements.get('settingsJwtExpiryResult').textContent).toBe('保存中…');
@@ -207,10 +219,12 @@ describe('numeric preference autosave', () => {
 		await vi.advanceTimersByTimeAsync(0);
 		expect(h.posts()).toHaveLength(1);
 		pending[0]();
-		await vi.advanceTimersByTimeAsync(0);
+		await vi.advanceTimersByTimeAsync(1099);
+		expect(h.posts()).toHaveLength(1);
+		await vi.advanceTimersByTimeAsync(1);
 		expect(h.posts()).toHaveLength(2);
 		pending[1]();
-		await vi.advanceTimersByTimeAsync(0);
+		await vi.advanceTimersByTimeAsync(1100);
 		expect(h.posts()).toHaveLength(3);
 		pending[2]();
 		await Promise.all([days, backups, format]);
@@ -236,10 +250,39 @@ describe('numeric preference autosave', () => {
 		expect(h.elements.get('settingsMaxBackupsResult').className).toContain('error');
 		expect(h.elements.get('settingsMaxBackupsResult').textContent).toContain(failure === 'network' ? '未保存' : '暂时无法保存');
 		fail = false;
-		await h.blur('settingsMaxBackups');
+		const retrying = h.blur('settingsMaxBackups');
+		await vi.advanceTimersByTimeAsync(1099);
+		expect(h.posts()).toHaveLength(1);
+		await vi.advanceTimersByTimeAsync(1);
+		await retrying;
 		expect(h.settings.maxBackups).toBe(80);
 		expect(h.posts()).toHaveLength(2);
 		expect(h.elements.get('settingsMaxBackupsResult').className).toContain('success');
+	});
+
+	it.each(['numeric', 'export format'])('does not submit a discarded %s draft after the shared save wait', async (kind) => {
+		const h = createHarness();
+		await h.api.loadPreferences();
+		h.input('settingsJwtExpiryDays', '60');
+		await h.blur('settingsJwtExpiryDays');
+		let saving;
+		if (kind === 'numeric') {
+			h.input('settingsMaxBackups', '7');
+			saving = h.blur('settingsMaxBackups');
+		} else {
+			h.elements.get('settingsDefaultExportFormat').value = 'csv';
+			saving = h.api.saveDefaultExportFormat();
+		}
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(h.posts()).toEqual([{ jwtExpiryDays: 60 }]);
+		expect(h.api.hasUnsavedSettingsChanges()).toBe(true);
+		h.api.discardSettingsDrafts();
+		await vi.advanceTimersByTimeAsync(1100);
+		await saving;
+		expect(h.posts()).toEqual([{ jwtExpiryDays: 60 }]);
+		expect(h.settings.maxBackups).toBe(100);
+		expect(h.settings.defaultExportFormat).toBe('json');
+		expect(h.api.hasUnsavedSettingsChanges()).toBe(false);
 	});
 
 	it('resends the original value if an intervening save lost its response', async () => {
@@ -264,7 +307,7 @@ describe('numeric preference autosave', () => {
 		h.input('settingsJwtExpiryDays', '30');
 		await vi.advanceTimersByTimeAsync(500);
 		lost.reject(new Error('Response lost after server saved'));
-		await vi.advanceTimersByTimeAsync(0);
+		await vi.advanceTimersByTimeAsync(1100);
 		expect(h.posts()).toEqual([{ jwtExpiryDays: 45 }, { jwtExpiryDays: 30 }]);
 		expect(h.settings.jwtExpiryDays).toBe(30);
 	});
@@ -273,11 +316,110 @@ describe('numeric preference autosave', () => {
 		const h = createHarness();
 		h.input('settingsJwtExpiryDays', '120');
 		h.input('settingsMaxBackups', '0');
-		await vi.advanceTimersByTimeAsync(500);
+		await vi.advanceTimersByTimeAsync(1600);
 		const reloaded = createHarness({ settings: h.settings });
 		await reloaded.api.loadPreferences();
 		expect(reloaded.elements.get('settingsJwtExpiryDays').value).toBe('120');
 		expect(reloaded.elements.get('settingsMaxBackups').value).toBe('0');
 		expect(reloaded.posts()).toEqual([]);
+	});
+});
+
+describe('SDK preference bridge', () => {
+	it('validates the whole patch before applying local settings and reports remote language failures honestly', async () => {
+		const h = createHarness({
+			fetchImpl: async () => {
+				throw new Error('network unavailable');
+			},
+		});
+		h.api.applyTheme = vi.fn();
+		expect(await h.api.setThemePublicPreferences({ theme: 'dark', unknown: true })).toMatchObject({ status: 'rejected' });
+		expect(h.storage.has('theme')).toBe(false);
+		expect(await h.api.setThemePublicPreferences({ language: 'en' })).toEqual({ status: 'unknown', reason: 'language-local-only' });
+		expect(h.api.getLanguage()).toBe('en');
+	});
+
+	it('does not write a queued language preference into a later session', async () => {
+		const h = createHarness();
+		h.api.secretSessionGeneration = 3;
+		h.api.isSecretSessionCurrent = (generation) => generation === h.api.secretSessionGeneration;
+		const saving = h.api.setThemePublicPreferences({ language: 'en' });
+		h.api.secretSessionGeneration = 4;
+		expect(await saving).toMatchObject({ status: 'session-invalidated' });
+		expect(h.posts()).toEqual([]);
+	});
+});
+
+describe('language preference loading', () => {
+	it('preserves a setup language stored only in this browser when the server has no language preference', async () => {
+		const env = { SECRETS_KV: { get: async () => JSON.stringify({ maxBackups: 50 }) }, LOG_LEVEL: 'ERROR' };
+		const h = createHarness({
+			fetchImpl: () => handleGetSettings({ method: 'GET', headers: new Headers() }, env),
+		});
+		h.api.setLanguage('en');
+		await h.api.loadPreferences();
+		expect(h.api.getLanguage()).toBe('en');
+		expect(h.elements.get('settingsLanguage').value).toBe('en');
+		expect(h.storage.get('language')).toBe('en');
+		expect(h.elements.get('settingsMaxBackups').value).toBe('50');
+	});
+
+	it('applies an explicitly saved auto preference even when this browser previously selected English', async () => {
+		const env = { SECRETS_KV: { get: async () => JSON.stringify({ language: 'auto' }) }, LOG_LEVEL: 'ERROR' };
+		const h = createHarness({
+			fetchImpl: () => handleGetSettings({ method: 'GET', headers: new Headers() }, env),
+		});
+		h.api.setLanguage('en');
+		await h.api.loadPreferences();
+		expect(h.api.getLanguagePreference()).toBe('auto');
+		expect(h.api.getLanguage()).toBe('zh-CN');
+		expect(h.elements.get('settingsLanguage').value).toBe('auto');
+	});
+
+	it('applies the saved server language when there are no local edits', async () => {
+		const h = createHarness({ settings: { language: 'zh-TW' } });
+		await h.api.loadPreferences();
+		expect(h.api.getLanguage()).toBe('zh-TW');
+		expect(h.elements.get('settingsLanguage').value).toBe('zh-TW');
+		expect(h.storage.get('language')).toBe('zh-TW');
+	});
+
+	it('keeps a newly saved language when an earlier preference load returns late', async () => {
+		const load = deferred();
+		const h = createHarness({
+			settings: { language: 'auto' },
+			fetchImpl: (_url, options, settings) => {
+				if (options?.method !== 'POST') {
+					return load.promise;
+				}
+				Object.assign(settings, JSON.parse(options.body));
+				return reply({ success: true, settings: { ...settings } });
+			},
+		});
+		const loading = h.api.loadPreferences();
+		await h.api.saveLanguagePreference('en');
+		load.resolve(reply({ language: 'auto' }));
+		await loading;
+		expect(h.settings.language).toBe('en');
+		expect(h.api.getLanguage()).toBe('en');
+		expect(h.elements.get('settingsLanguage').value).toBe('en');
+		expect(h.storage.get('language')).toBe('en');
+	});
+
+	it('ignores a preference load started while a language save is pending', async () => {
+		const load = deferred();
+		const save = deferred();
+		const h = createHarness({
+			fetchImpl: (_url, options) => (options?.method === 'POST' ? save.promise : load.promise),
+		});
+		const saving = h.api.saveLanguagePreference('en');
+		const loading = h.api.loadPreferences();
+		save.resolve(reply({ success: true, settings: { language: 'en' } }));
+		await saving;
+		load.resolve(reply({ language: 'auto' }));
+		await loading;
+		expect(h.api.getLanguage()).toBe('en');
+		expect(h.elements.get('settingsLanguage').value).toBe('en');
+		expect(h.storage.get('language')).toBe('en');
 	});
 });
